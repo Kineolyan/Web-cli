@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html>
+<head>
+<script src="https://npmcdn.com/xstream@5.0.6/dist/xstream.min.js"></script>
+<script src="https://npmcdn.com/@cycle/dom@10.0.0-rc34/dist/cycle-dom.min.js"></script>
+<script src="https://npmcdn.com/@cycle/xstream-run@3.0.2/dist/cycle.min.js"></script>
+<script src="https://npmcdn.com/@cycle/http@9.0.0-rc9/dist/cycle-http-driver.min.js"></script>
+  <meta charset="utf-8">
+  <title>JS Bin</title>
+</head>
+<body>
+	<div id="app"></div>
+	<script type="text/javascript">
+const xs = xstream.default;
+const {div, input, button, h1, h4, a, makeDOMDriver} = CycleDOM;
+const {makeHTTPDriver} = CycleHTTPDriver;
+
+const DEFAULT_VALUE = 50;
+
+function main(sources) {
+  const changeValue$ = sources.DOM.select('#slider')
+    .events('input')
+    .map(ev => ev.target.value);
+  const clickShutMarvin$ = sources.DOM.select('#shutdown')
+    .events('click')
+    .fold((acc) => acc + 1, 0);
+
+  const state$ = xs.combine(
+    changeValue$.startWith(DEFAULT_VALUE),
+    clickShutMarvin$.startWith(0))
+    .map(([value, count]) => ({value, count}));
+
+  const labelDom$ = state$.map(({value, count}) =>
+    div([
+      div([`Shutdown count: ${count}`]),
+      'Label: ' + value + ' units',
+      input('#slider', {
+        attrs: {type: 'range', min: 0, max: 100, value}
+      })
+    ])
+  );
+
+  const getRandomUser$ = sources.DOM.select('.get-random').events('click')
+    .map(() => {
+      const randomNum = Math.round(Math.random() * 9) + 1;
+      return {
+        url: 'https://jsonplaceholder.typicode.com/users/' + String(randomNum),
+        category: 'users',
+        method: 'GET'
+      };
+    });
+
+  const user$ = sources.HTTP.select('users')
+    .flatten()
+    .map(res => res.body)
+    .startWith(null);
+
+  const buttonDom$ = user$.map(user =>
+    div('.users', [
+      button('.get-random', 'Get random user'),
+      user === null ? null : div('.user-details', [
+        h1('.user-name', user.name),
+        h4('.user-email', user.email),
+        a('.user-website', {attrs: {href: user.website}}, user.website)
+      ])
+    ])
+  );
+
+  const vdom$ = xs.combine(labelDom$, buttonDom$)
+    .map(([labelDom, buttonDom]) =>
+      div([
+        div('#shutdown', ['Shutdown Marvin']),
+        div('#reboot', ['Reboot Marvin']),
+        div('#restart-plex', ['Restart Plex Server']),
+        labelDom,
+        buttonDom]));
+
+  return {
+    DOM: vdom$,
+    HTTP: getRandomUser$
+  };
+}
+
+Cycle.run(main, {
+  DOM: makeDOMDriver('#app'),
+  HTTP: makeHTTPDriver()
+});
+	</script>
+</body>
+</html>
