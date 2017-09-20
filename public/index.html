@@ -1,83 +1,111 @@
 <!DOCTYPE html>
 <html>
 <head>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.2.13/semantic.min.css">
 <script src="https://npmcdn.com/xstream@5.0.6/dist/xstream.min.js"></script>
 <script src="https://npmcdn.com/@cycle/dom@10.0.0-rc34/dist/cycle-dom.min.js"></script>
 <script src="https://npmcdn.com/@cycle/xstream-run@3.0.2/dist/cycle.min.js"></script>
 <script src="https://npmcdn.com/@cycle/http@9.0.0-rc9/dist/cycle-http-driver.min.js"></script>
   <meta charset="utf-8">
-  <title>JS Bin</title>
+  <title>Web CLI for Marvin</title>
 </head>
 <body>
 	<div id="app"></div>
 	<script type="text/javascript">
 const xs = xstream.default;
-const {div, input, button, h1, h4, a, makeDOMDriver} = CycleDOM;
+const {div, input, button, h1, h4, a, makeDOMDriver, li, ul} = CycleDOM;
 const {makeHTTPDriver} = CycleHTTPDriver;
 
 const DEFAULT_VALUE = 50;
 
-function main(sources) {
-  const changeValue$ = sources.DOM.select('#slider')
-    .events('input')
-    .map(ev => ev.target.value);
-  const clickShutMarvin$ = sources.DOM.select('#shutdown')
-    .events('click')
-    .fold((acc) => acc + 1, 0);
+function btn(sources, id, {name, classes, url}) {
+  url = 'https://jsonplaceholder.typicode.com/users/1'; // FIXME tests
 
-  const state$ = xs.combine(
-    changeValue$.startWith(DEFAULT_VALUE),
-    clickShutMarvin$.startWith(0))
-    .map(([value, count]) => ({value, count}));
+  const onClick$ = sources.DOM.select(`#${id}`)
+    .events('click');
 
-  const labelDom$ = state$.map(({value, count}) =>
-    div([
-      div([`Shutdown count: ${count}`]),
-      'Label: ' + value + ' units',
-      input('#slider', {
-        attrs: {type: 'range', min: 0, max: 100, value}
-      })
-    ])
-  );
+  const httpCategory = `action-${id}`;
+  const http$ = onClick$.map(() => ({
+    url,
+    category: httpCategory,
+    method: 'GET'
+  }));
 
-  const getRandomUser$ = sources.DOM.select('.get-random').events('click')
-    .map(() => {
-      const randomNum = Math.round(Math.random() * 9) + 1;
-      return {
-        url: 'https://jsonplaceholder.typicode.com/users/' + String(randomNum),
-        category: 'users',
-        method: 'GET'
-      };
-    });
-
-  const user$ = sources.HTTP.select('users')
+  const state$ = sources.HTTP.select(httpCategory)
     .flatten()
-    .map(res => res.body)
+    .map(res => ({success: res.ok}))
     .startWith(null);
 
-  const buttonDom$ = user$.map(user =>
-    div('.users', [
-      button('.get-random', 'Get random user'),
-      user === null ? null : div('.user-details', [
-        h1('.user-name', user.name),
-        h4('.user-email', user.email),
-        a('.user-website', {attrs: {href: user.website}}, user.website)
-      ])
-    ])
-  );
+  const btnDom$ = state$.map(count =>
+    button(
+      `#${id}${classes.map(c => `.${c}`).join(' ')}`,
+      [name]));
 
-  const vdom$ = xs.combine(labelDom$, buttonDom$)
-    .map(([labelDom, buttonDom]) =>
+  return {
+    state: state$,
+    http: http$,
+    dom: btnDom$
+  };
+}
+
+function main(sources) {
+  const shutDown$ = btn(
+    sources,
+    'shutdown-marvin',
+    {
+      name: 'Shutdown Marvin',
+      url: '/actions/os/shutdown',
+      classes: ['massive', 'ui', 'button'],
+    });
+  const reboot$ = btn(
+    sources,
+    'reboot-marvin',
+    {
+      name: 'Reboot Marvin',
+      url: '/actions/os/reboot',
+      classes: ['massive', 'ui', 'button'],
+    });
+  const restartPlex$ = btn(
+    sources,
+    'restart-plex',
+    {
+      name: 'Restart Plex',
+      url: '/actions/plex/restart',
+      classes: ['massive', 'ui', 'button'],
+    });
+
+  const state$ = xs.combine(
+    shutDown$.state,
+    reboot$.state,
+    restartPlex$.state)
+    .map(([count, c1, c2]) => ({count, c1, c2}));
+
+  const counts$ = state$.map(state =>
+    div([`${state.count} ${state.c1} ${state.c2}`]));
+
+  const vdom$ = xs.combine(
+      shutDown$.dom,
+      reboot$.dom,
+      restartPlex$.dom,
+      counts$)
+    .map(([shutDown, reboot, restartPlex, cs, h]) =>
       div([
-        div('#shutdown', ['Shutdown Marvin']),
-        div('#reboot', ['Reboot Marvin']),
-        div('#restart-plex', ['Restart Plex Server']),
-        labelDom,
-        buttonDom]));
+        div([shutDown]),
+        div([reboot]),
+        div([restartPlex]),
+        cs
+      ]));
+
+  const http$ = xs.combine(
+    shutDown$.http)
+    .map(req => {
+      console.log(req)
+      return req;
+    });
 
   return {
     DOM: vdom$,
-    HTTP: getRandomUser$
+    HTTP: http$
   };
 }
 
@@ -88,3 +116,5 @@ Cycle.run(main, {
 	</script>
 </body>
 </html>
+
+
