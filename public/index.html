@@ -2,21 +2,77 @@
 <html>
 <head>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/semantic-ui/2.2.13/semantic.min.css">
-<script src="https://npmcdn.com/xstream@5.0.6/dist/xstream.min.js"></script>
-<script src="https://npmcdn.com/@cycle/dom@10.0.0-rc34/dist/cycle-dom.min.js"></script>
-<script src="https://npmcdn.com/@cycle/xstream-run@3.0.2/dist/cycle.min.js"></script>
-<script src="https://npmcdn.com/@cycle/http@9.0.0-rc9/dist/cycle-http-driver.min.js"></script>
+<script src="https://unpkg.com/xstream@10.9.0/dist/xstream.min.js"></script>
+<script src="https://unpkg.com/@cycle/http@14.3.0/dist/cycle-http-driver.min.js"></script>
+<script src="https://unpkg.com/@cycle/dom@18.3.0/dist/cycle-dom.min.js"></script>
+<script src="https://unpkg.com/@cycle/run@3.2.0/dist/cycle-run.min.js"></script>
   <meta charset="utf-8">
   <title>Web CLI for Marvin</title>
 </head>
-<body>
+<body style="margin: 10px 15px">
 	<div id="app"></div>
 	<script type="text/javascript">
 const xs = xstream.default;
-const {div, input, button, h1, h4, a, makeDOMDriver, li, ul} = CycleDOM;
+const {div, input, button, h1, h4, a, makeDOMDriver, li, ul, i} = CycleDOM;
 const {makeHTTPDriver} = CycleHTTPDriver;
 
 const DEFAULT_VALUE = 50;
+
+function status(sources) {
+  const query = {
+    url: '/actions/ping',
+    category: 'host-ping'
+  };
+  const http$ = xs.periodic(5000)
+    .mapTo(query)
+    .startWith(query);
+
+  const state$ = sources.HTTP.select('host-ping')
+    .map(response$ => response$.replaceError(
+      () => xs.of({ok: false})))
+    .flatten()
+    .fold(
+      (result, response) => {
+        const now = Date.now();
+        return response.ok
+          ? {lastUp: now, lastPing: now}
+          : {...result, lastPing: now};
+      },
+      {})
+    .startWith({
+      lastUp: null,
+      lastPing: null
+    });
+
+  const dom$ = state$
+    .filter(state => state !== undefined)
+    .map(state => {
+      let status;
+      if (state.lastUp === null) {
+        status = 'black';
+      } else if (state.lastUp === state.lastPing) {
+        status = 'green';
+      } else {
+        status = 'red';
+      }
+      return div(
+        '.ui.message',
+        {style: {marginBottom: '10px'}},
+        [
+          div('.header', ['Service Up-state']),
+          i('.heartbeat.icon', {style: {color: status}}),
+          `Last up time: ${
+            state.lastUp
+            ? new Date(state.lastUp).toLocaleString()
+            : '--'}`]);
+    });
+
+  return {
+    http: http$,
+    state: state$,
+    dom: dom$
+  };
+}
 
 function btn(sources, id, {name, classes, url}) {
   url = 'https://jsonplaceholder.typicode.com/users/1'; // FIXME tests
@@ -27,19 +83,38 @@ function btn(sources, id, {name, classes, url}) {
   const httpCategory = `action-${id}`;
   const http$ = onClick$.map(() => ({
     url,
-    category: httpCategory,
-    method: 'GET'
+    category: httpCategory
   }));
 
-  const state$ = sources.HTTP.select(httpCategory)
+  const httpState$ = sources.HTTP.select(httpCategory)
+    .map(response$ => response$
+      .replaceError(() => xs.of({ok: false})))
     .flatten()
-    .map(res => ({success: res.ok}))
-    .startWith(null);
+    .map(res => res.ok ? 'success' : 'error');
+  const clickState$ = onClick$.mapTo('pending');
 
-  const btnDom$ = state$.map(count =>
-    button(
-      `#${id}${classes.map(c => `.${c}`).join(' ')}`,
-      [name]));
+  const state$ = xs.merge(
+      httpState$,
+      clickState$)
+    .startWith('default')
+    .map(state => ({progress: state}));
+
+  const PROGRESS_CLASSES = {
+    default: [],
+    pending: ['basic', 'orange'],
+    success: ['positive'],
+    error: ['negative']
+  }
+
+  const btnDom$ = state$.map(state => {
+    const btnClasses = [
+      'massive', 'ui', 'button',
+      ...(classes || []),
+      ...PROGRESS_CLASSES[state.progress]];
+    return button(
+      `#${id}${btnClasses.map(c => `.${c}`).join(' ')}`,
+      [name])
+  });
 
   return {
     state: state$,
@@ -49,13 +124,14 @@ function btn(sources, id, {name, classes, url}) {
 }
 
 function main(sources) {
+  const status$ = status(sources);
+
   const shutDown$ = btn(
     sources,
     'shutdown-marvin',
     {
       name: 'Shutdown Marvin',
-      url: '/actions/os/shutdown',
-      classes: ['massive', 'ui', 'button'],
+      url: '/actions/os/shutdown'
     });
   const reboot$ = btn(
     sources,
@@ -63,15 +139,13 @@ function main(sources) {
     {
       name: 'Reboot Marvin',
       url: '/actions/os/reboot',
-      classes: ['massive', 'ui', 'button'],
     });
   const restartPlex$ = btn(
     sources,
     'restart-plex',
     {
       name: 'Restart Plex',
-      url: '/actions/plex/restart',
-      classes: ['massive', 'ui', 'button'],
+      url: '/actions/plex/restart'
     });
 
   const state$ = xs.combine(
@@ -81,27 +155,28 @@ function main(sources) {
     .map(([count, c1, c2]) => ({count, c1, c2}));
 
   const counts$ = state$.map(state =>
-    div([`${state.count} ${state.c1} ${state.c2}`]));
+    div([`${JSON.stringify(state.count)} ${state.c1} ${state.c2}`]));
 
   const vdom$ = xs.combine(
+      status$.dom,
       shutDown$.dom,
       reboot$.dom,
       restartPlex$.dom,
       counts$)
-    .map(([shutDown, reboot, restartPlex, cs, h]) =>
+    .map(([status,shutDown, reboot, restartPlex, cs, h]) =>
       div([
+        status,
         div([shutDown]),
         div([reboot]),
         div([restartPlex]),
         cs
       ]));
 
-  const http$ = xs.combine(
-    shutDown$.http)
-    .map(req => {
-      console.log(req)
-      return req;
-    });
+  const http$ = xs.merge(
+    status$.http,
+    shutDown$.http,
+    reboot$.http,
+    restartPlex$.http);
 
   return {
     DOM: vdom$,
