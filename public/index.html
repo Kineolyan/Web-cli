@@ -75,8 +75,7 @@ function status(sources) {
 }
 
 function btn(sources, id, {name, classes, url}) {
-  url = 'https://jsonplaceholder.typicode.com/users/1'; // FIXME tests
-
+  // url = 'https://jsonplaceholder.typicode.com/users/1'; // FIXME tests
   const onClick$ = sources.DOM.select(`#${id}`)
     .events('click');
 
@@ -86,25 +85,48 @@ function btn(sources, id, {name, classes, url}) {
     category: httpCategory
   }));
 
+  const clickState$ = onClick$.mapTo('pending');
   const httpState$ = sources.HTTP.select(httpCategory)
     .map(response$ => response$
       .replaceError(() => xs.of({ok: false})))
     .flatten()
     .map(res => res.ok ? 'success' : 'error');
-  const clickState$ = onClick$.mapTo('pending');
+  const resetState$ = httpState$.filter(v => v === 'success')
+    .map(() => xs.create({
+      start(listener) {
+        this.timeoutId = setTimeout(
+          () => {
+            listener.next();
+            listener.complete();
+          },
+          5000);
+      },
+      stop() {
+        clearTimeout(this.timeoutId);
+      }
+    }))
+    .flatten();
 
-  const state$ = xs.merge(
+  const eventState$ = xs.merge(
       httpState$,
       clickState$)
     .startWith('default')
     .map(state => ({progress: state}));
+  // const state$ = eventState$.map((state) => {
+  //     // Reset only at the end of an action
+  //     // FIXME with two click, it is possible to reset the second with the first
+  //     return state.progress === 'success' || state.progress === 'error'
+  //       ? {...state, progress: 'default'}
+  //       : state;
+  //   });
+  const state$ = eventState$;
 
   const PROGRESS_CLASSES = {
     default: [],
     pending: ['basic', 'orange'],
     success: ['positive'],
     error: ['negative']
-  }
+  };
 
   const btnDom$ = state$.map(state => {
     const btnClasses = [
@@ -145,31 +167,20 @@ function main(sources) {
     'restart-plex',
     {
       name: 'Restart Plex',
-      url: '/actions/plex/restart'
+      url: '/actions/plex/reboot'
     });
-
-  const state$ = xs.combine(
-    shutDown$.state,
-    reboot$.state,
-    restartPlex$.state)
-    .map(([count, c1, c2]) => ({count, c1, c2}));
-
-  const counts$ = state$.map(state =>
-    div([`${JSON.stringify(state.count)} ${state.c1} ${state.c2}`]));
 
   const vdom$ = xs.combine(
       status$.dom,
       shutDown$.dom,
       reboot$.dom,
-      restartPlex$.dom,
-      counts$)
-    .map(([status,shutDown, reboot, restartPlex, cs, h]) =>
+      restartPlex$.dom)
+    .map(([status,shutDown, reboot, restartPlex]) =>
       div([
         status,
-        div([shutDown]),
-        div([reboot]),
-        div([restartPlex]),
-        cs
+        div({style: {marginBottom: '5px'}},[shutDown]),
+        div({style: {marginBottom: '5px'}}, [reboot]),
+        div({style: {marginBottom: '5px'}}, [restartPlex])
       ]));
 
   const http$ = xs.merge(
