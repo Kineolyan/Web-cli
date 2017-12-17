@@ -1,0 +1,13 @@
+[Unit]
+Description=Jarvis Web Interface
+
+[Service]
+ExecStart=/usr/share/webapps/web-cli/web-cli 3310
+Restart=always
+User=jarvis
+Group=users
+Environment=PATH=/usr/bin:/usr/local/bin
+WorkingDirectory=/usr/share/webapps/web-cli
+
+[Install]
+WantedBy=multi-user.target
