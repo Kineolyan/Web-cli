@@ -39,6 +39,10 @@ fn ping(_: &mut Request) -> IronResult<Response> {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let default_port = String::from("3000");
+    let port = if args.len() > 1 { &args[1] } else { &default_port };
+
     let staticfiles = staticfile::Static::new("public/");
     let router = router!(
         shutdown_os_action: get "/actions/os/shutdown" => shutdown_handler,
@@ -50,8 +54,10 @@ fn main() {
     let mut chain = Chain::new(router);
     chain.link_after(response_printer);
 
-    let _server = Iron::new(chain).http("localhost:3000").unwrap();
-    println!("On 3000");
+    let url = format!("localhost:{}", port);
+    println!("{}", url);
+    let _server = Iron::new(chain).http(url).unwrap();
+    println!("Running on {}", port);
 }
 
 // #[cfg(test)]
