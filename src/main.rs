@@ -9,7 +9,7 @@ use iron::prelude::*;
 use iron::status;
 
 fn response_printer(_req: &mut Request, res: Response) -> IronResult<Response> {
-    println!("Response produced: {}", res);
+    // println!("Response produced: {}", res);
     Ok(res)
 }
 
